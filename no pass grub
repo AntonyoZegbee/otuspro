@@ -1,0 +1,30 @@
+nano /etc/default/grub
+
+измение параметров 
+#GRUB_TIMEOUT_STYLE=hidden
+GRUB_TIMEOUT=10
+
+sudo update-grub
+
+reboot
+
+Вход в окно виртуалбокса, ssh не доступен на этапе загрузки ( копипас не работает ) 
+
+Когда появится меню Grub, выберите нужное ядро и нажмите e, чтобы редактировать параметры загрузки
+
+Найдите строку, начинающуюся с linux
+В конце этой строки дописать linux /boot/vmlinuz-5.15.0-46-generic root=UUID=XXXX ro quiet splash нужный текст init=/bin/bash
+
+linux /boot/vmlinuz-5.15.0-46-generic root=UUID=XXXX ro quiet splash init=/bin/bash
+
+Ctrl + X
+
+Чтобы активировать режим редактирования рут 
+mount -o remount,rw /
+
+Можно редактировать файлы
+Восстановить пароль на пользователе
+
+Проверка mount | grep root
+
+Перезагрузка системы и возврат к нормальной загрузке
