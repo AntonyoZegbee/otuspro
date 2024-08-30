@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Log Monitor every 30 seconds
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=30
+Unit=log-monitor.service
+
+[Install]
+WantedBy=timers.target
