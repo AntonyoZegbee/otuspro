@@ -1,0 +1,15 @@
+[Unit]
+Description=PHP FastCGI Process Manager
+After=network.target
+
+[Service]
+Type=simple
+User=nginx
+Group=nginx
+EnvironmentFile=/etc/sysconfig/phpfastcgi
+ExecStart=/usr/bin/spawn-fcgi -a ${SERVER_IP} -p ${SERVER_PORT} -u ${SERVER_USER} -g ${SERVER_GROUP} -P ${PIDFILE} -C ${SERVER_CHILDS} -f ${PHP_CGI}
+PIDFile=/var/run/php_cgi.pid
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
