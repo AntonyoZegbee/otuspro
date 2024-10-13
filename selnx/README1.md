@@ -2,3 +2,29 @@
 Ошибка SELinux : Контекст безопасности файла.unconfined_uвместо `systsystem_u:object_r:named_zone_t:s0)
 Проблемы с доступом к DNS-серверу :127.0.0.1
 Настройки брандмауэра : Порт 53 (DNS) был заблокирован
+
+Предложенные решения для устранения проблем
+SELinux может блокировать доступ к BIND
+
+1.Восстановление контекста безопасности SELinux для файла зоны:
+sudo restorecon -v /var/named/ddns.lab.db
+
+2.В конфигурации DNS-сервера в фай/etc/named.conf необход
+Настройте BIND для прослушивания на нужных интерфейсах
+options {
+    listen-on port 53 { 127.0.0.1; 192.168.1.131; };
+    allow-query { localhost; 192.168.1.0/24; };
+}
+
+3.Открытие порта для DNS
+
+sudo firewall-cmd --add-port=53/tcp --permanent
+sudo firewall-cmd --add-port=53/udp --permanent
+sudo firewall-cmd --reload
+
+Все три проблемы
+SELinux
+Конфигурация BIND
+Брандмауэр
+
+В результате выполнения этих шагов нам удалось успешно добавить запись для домена.www.ddns.labчерез утилиту nsupdate, и запись была корректно возвращена при запросеdigи nslookup.
