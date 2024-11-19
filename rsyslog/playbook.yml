@@ -1,0 +1,121 @@
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: Install common packages
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - curl
+        - vim
+
+- hosts: web
+  become: true
+  vars:
+    nginx_conf_path: "/etc/nginx/nginx.conf"
+
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Configure nginx
+      copy:
+        src: ./nginx/nginx.conf
+        dest: "{{ nginx_conf_path }}"
+        mode: '0644'
+      notify:
+        - restart_nginx
+
+    - name: Ensure nginx is running
+      systemd:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Configure auditd for nginx configuration
+      apt:
+        name: auditd
+        state: present
+
+    - name: Add audit rule for nginx.conf
+      command: >
+        auditctl -w {{ nginx_conf_path }} -p wa -k nginx_config_change
+
+    - name: Configure rsyslog to forward logs to the log server
+      lineinfile:
+        path: /etc/rsyslog.d/50-default.conf
+        line: '*.* @192.168.56.15:514'
+        state: present
+      notify:
+        - restart_rsyslog
+
+  handlers:
+    - name: restart_nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    - name: restart_rsyslog
+      systemd:
+        name: rsyslog
+        state: restarted
+
+- hosts: log
+  become: true
+  tasks:
+    - name: Install rsyslog
+      apt:
+        name: rsyslog
+        state: present
+
+    - name: Configure rsyslog to listen for remote logs
+      blockinfile:
+        path: /etc/rsyslog.conf
+        block: |
+          $ModLoad imudp
+          $UDPServerRun 514
+      notify:
+        - restart_rsyslog
+
+    - name: Ensure rsyslog is running
+      systemd:
+        name: rsyslog
+        state: started
+        enabled: true
+
+  handlers:
+    - name: restart_rsyslog
+      systemd:
+        name: rsyslog
+        state: restarted
+
+- hosts: client
+  become: true
+  tasks:
+    - name: Install rsyslog
+      apt:
+        name: rsyslog
+        state: present
+
+    - name: Configure rsyslog to forward logs to the central log server
+      lineinfile:
+        path: /etc/rsyslog.d/50-default.conf
+        line: '*.* @192.168.56.15:514'
+        state: present
+      notify:
+        - restart_rsyslog
+
+    - name: Ensure rsyslog is running
+      systemd:
+        name: rsyslog
+        state: started
+        enabled: true
+
+  handlers:
+    - name: restart_rsyslog
+      systemd:
+        name: rsyslog
+        state: restarted
