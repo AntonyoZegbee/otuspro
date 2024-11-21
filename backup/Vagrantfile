@@ -1,0 +1,96 @@
+Vagrant.configure("2") do |config|
+  # Настройка backup_server
+  config.vm.define "backup_server" do |backup|
+    backup.vm.box = "ubuntu/focal64"
+    backup.vm.network "private_network", ip: "192.168.11.160"
+    backup.vm.provider "virtualbox" do |vb|
+      vb.memory = 1024
+    end
+    backup.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      apt-get update
+      apt-get install -y borgbackup logrotate
+      # Создание пользователя borg и каталога для резервного копирования
+      useradd -m borg
+      mkdir /var/backup
+      chown borg:borg /var/backup
+      # Настройка SSH-доступа для пользователя borg
+      mkdir -p /home/borg/.ssh
+      touch /home/borg/.ssh/authorized_keys
+      chown -R borg:borg /home/borg/.ssh
+      chmod 700 /home/borg/.ssh
+      chmod 600 /home/borg/.ssh/authorized_keys
+      # Настройка ротации логов с помощью logrotate
+      echo "/var/log/syslog {
+        daily
+        missingok
+        rotate 14
+        compress
+        notifempty
+        create 640 root adm
+      }" > /etc/logrotate.d/borg-backup
+    SHELL
+  end
+
+  # Настройка client
+  config.vm.define "client" do |client|
+    client.vm.box = "ubuntu/focal64"
+    client.vm.network "private_network", ip: "192.168.11.150"
+    client.vm.provider "virtualbox" do |vb|
+      vb.memory = 1024
+    end
+    client.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      apt-get update
+      apt-get install -y borgbackup sshpass software-properties-common
+      apt-add-repository --yes --update ppa:ansible/ansible
+      apt-get update
+      apt-get install -y ansible
+      
+      # Генерация SSH ключей
+      sudo -u vagrant ssh-keygen -t rsa -b 2048 -f /home/vagrant/.ssh/id_rsa -N ''
+      sudo -u vagrant chmod 600 /home/vagrant/.ssh/id_rsa
+
+      # Добавление удаленного хоста в known_hosts
+      ssh-keyscan -H 192.168.11.160 >> /home/vagrant/.ssh/known_hosts
+
+      # Передача SSH ключа на backup_server
+      sshpass -p "vagrant" sudo -u vagrant ssh-copy-id -i /home/vagrant/.ssh/id_rsa.pub -o StrictHostKeyChecking=no borg@192.168.11.160
+
+      # Копирование ключа в домашнюю директорию root, чтобы он мог использоваться для borg
+      mkdir -p /root/.ssh
+      cp /home/vagrant/.ssh/id_rsa /root/.ssh/
+      cp /home/vagrant/.ssh/known_hosts /root/.ssh/
+      chmod 600 /root/.ssh/id_rsa
+
+      # Инициализация репозитория Borg на сервере backup
+      export BORG_PASSPHRASE="Otus1234"
+      BORG_PASSPHRASE='Otus1234' borg init --encryption=repokey borg@192.168.11.160:/var/backup/
+      
+      # Создание systemd unit и таймера для автоматизации бэкапов
+      echo "[Unit]
+      Description=Borg Backup
+
+      [Service]
+      Type=oneshot
+      Environment=\"BORG_PASSPHRASE=Otus1234\"
+      ExecStart=/usr/bin/borg create --stats --list borg@192.168.11.160:/var/backup/::etc-{now:%%Y-%%m-%%d_%%H:%%M:%%S} /etc 2>&1 | logger -t borg-backup
+      ExecStart=/usr/bin/borg prune --keep-daily 90 --keep-monthly 12 --keep-yearly 1 borg@192.168.11.160:/var/backup/ 2>&1 | logger -t borg-backup
+      " > /etc/systemd/system/borg-backup.service
+
+      echo "[Unit]
+      Description=Borg Backup Timer
+
+      [Timer]
+      OnUnitActiveSec=5min
+
+      [Install]
+      WantedBy=timers.target
+      " > /etc/systemd/system/borg-backup.timer
+
+      # Включение и запуск таймера
+      systemctl enable borg-backup.timer
+      systemctl start borg-backup.timer
+    SHELL
+  end
+end
