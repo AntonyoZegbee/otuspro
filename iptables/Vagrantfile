@@ -1,0 +1,94 @@
+Vagrant.configure("2") do |config|
+  # centralRouter
+  config.vm.define "centralRouter" do |centralRouter|
+    centralRouter.vm.box = "ubuntu/bionic64"
+    centralRouter.vm.network "private_network", ip: "192.168.56.10"
+    centralRouter.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y iptables iptables-persistent
+
+      # Установка маршрута по умолчанию через inetRouter
+      ip route add default via 192.168.56.11
+    SHELL
+  end
+
+  # inetRouter 
+  config.vm.define "inetRouter" do |inetRouter|
+    inetRouter.vm.box = "ubuntu/bionic64"
+    inetRouter.vm.network "private_network", ip: "192.168.56.11"
+    inetRouter.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y iptables iptables-persistent
+
+      # Настройка knocking port для доступа к SSH
+      iptables -A INPUT -p tcp --dport 1111 -m recent --set --name KNOCK1
+      iptables -A INPUT -p tcp --dport 2222 -m recent --rcheck --name KNOCK1 -m recent --set --name KNOCK2
+      iptables -A INPUT -p tcp --dport 3333 -m recent --rcheck --name KNOCK2 -m recent --set --name SSH_OPEN
+      iptables -A INPUT -p tcp --dport 22 -m recent --rcheck --seconds 60 --name SSH_OPEN -j ACCEPT
+      iptables-save > /etc/iptables/rules.v4
+    SHELL
+  end
+
+  # inetRouter2
+  config.vm.define "inetRouter2" do |inetRouter2|
+    inetRouter2.vm.box = "ubuntu/bionic64"
+    inetRouter2.vm.network "private_network", ip: "192.168.56.12"
+    inetRouter2.vm.network "forwarded_port", guest: 8080, host: 8080
+    inetRouter2.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y iptables iptables-persistent
+
+      # Проброс порта 8080 на 80 порт centralServer
+      iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination 192.168.56.13:80
+      iptables -A FORWARD -p tcp -d 192.168.56.13 --dport 80 -j ACCEPT
+      iptables-save > /etc/iptables/rules.v4
+    SHELL
+  end
+
+  # centralServer
+  config.vm.define "centralServer" do |centralServer|
+    centralServer.vm.box = "ubuntu/bionic64"
+    centralServer.vm.network "private_network", ip: "192.168.56.13"
+    centralServer.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y nginx
+      systemctl start nginx
+      systemctl enable nginx
+    SHELL
+  end
+
+  # Генерация SSH ключа и копирование его на все виртуальные машины
+  config.vm.provision "shell", inline: <<-SHELL
+    if [ ! -f /home/vagrant/.ssh/id_rsa ]; then
+      ssh-keygen -t rsa -b 2048 -f /home/vagrant/.ssh/id_rsa -N ""
+    fi
+  SHELL
+
+  # Добавляем публичный ключ к каждой машине
+  ["centralRouter", "inetRouter", "inetRouter2", "centralServer"].each do |vm|
+    config.vm.define vm do |machine|
+      machine.vm.provision "shell", inline: <<-SHELL
+        mkdir -p /home/vagrant/.ssh
+        cp /vagrant/.ssh/id_rsa.pub /home/vagrant/.ssh/authorized_keys
+        chown vagrant:vagrant /home/vagrant/.ssh/authorized_keys
+      SHELL
+    end
+  end
+
+  # Копирование ключа на сервер borg в примонтированный диск
+  config.vm.provision "shell", inline: <<-SHELL
+    if [ ! -d /mnt/borg/.ssh ]; then
+      mkdir -p /mnt/borg/.ssh
+    fi
+    cp /home/vagrant/.ssh/id_rsa.pub /mnt/borg/.ssh/authorized_keys
+    chown vagrant:vagrant /mnt/borg/.ssh/authorized_keys
+  SHELL
+end
