@@ -63,3 +63,12 @@ PING 192.168.2.3 (192.168.2.3) 56(84) bytes of data.
 --- 192.168.2.3 ping statistics ---
 4 packets transmitted, 4 received, 0% packet loss, time 3012ms
 rtt min/avg/max/mdev = 1.360/1.679/1.885/0.200 ms
+
+
+PS D:\Vagrant> vagrant ssh office1Server
+Last login: Sat Dec  7 13:17:38 2024 from 10.0.2.2
+[vagrant@office1Server ~]$ ping 192.168.0.2
+PING 192.168.0.2 (192.168.0.2) 56(84) bytes of data.
+64 bytes from 192.168.0.2: icmp_seq=1 ttl=63 time=2.29 ms
+64 bytes from 192.168.0.2: icmp_seq=2 ttl=63 time=1.39 ms
+64 bytes from 192.168.0.2: icmp_seq=3 ttl=63 time=1.84 ms
