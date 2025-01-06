@@ -1,0 +1,82 @@
+# *- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  # Общие настройки для всех машин
+  config.vm.box = "ubuntu/bionic64"
+
+  # Первая машина (Router1)
+  config.vm.define "router1" do |router1|
+    router1.vm.hostname = "router1"
+    router1.vm.network "private_network", ip: "192.168.10.1"
+    router1.vm.network "private_network", ip: "192.168.20.1"
+
+    router1.vm.provision "shell", inline: <<-SHELL
+      sudo apt-get update
+      sudo apt-get install -y frr
+      sudo sysctl -w net.ipv4.ip_forward=1
+
+      cat <<EOL | sudo tee /etc/frr/frr.conf
+frr defaults traditional
+log stdout
+hostname router1
+service integrated-vtysh-config
+router ospf
+  network 192.168.10.0/24 area 0
+  network 192.168.20.0/24 area 0
+EOL
+
+      sudo systemctl restart frr
+    SHELL
+  end
+
+  # Вторая машина (Router2)
+  config.vm.define "router2" do |router2|
+    router2.vm.hostname = "router2"
+    router2.vm.network "private_network", ip: "192.168.20.2"
+    router2.vm.network "private_network", ip: "192.168.30.1"
+
+    router2.vm.provision "shell", inline: <<-SHELL
+      sudo apt-get update
+      sudo apt-get install -y frr
+      sudo sysctl -w net.ipv4.ip_forward=1
+
+      cat <<EOL | sudo tee /etc/frr/frr.conf
+frr defaults traditional
+log stdout
+hostname router2
+service integrated-vtysh-config
+router ospf
+  network 192.168.20.0/24 area 0
+  network 192.168.30.0/24 area 0
+EOL
+
+      sudo systemctl restart frr
+    SHELL
+  end
+
+  # Третья машина (Router3)
+  config.vm.define "router3" do |router3|
+    router3.vm.hostname = "router3"
+    router3.vm.network "private_network", ip: "192.168.30.2"
+    router3.vm.network "private_network", ip: "192.168.40.1"
+
+    router3.vm.provision "shell", inline: <<-SHELL
+      sudo apt-get update
+      sudo apt-get install -y frr
+      sudo sysctl -w net.ipv4.ip_forward=1
+
+      cat <<EOL | sudo tee /etc/frr/frr.conf
+frr defaults traditional
+log stdout
+hostname router3
+service integrated-vtysh-config
+router ospf
+  network 192.168.30.0/24 area 0
+  network 192.168.40.0/24 area 0
+EOL
+
+      sudo systemctl restart frr
+    SHELL
+  end
+end
