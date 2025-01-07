@@ -2,36 +2,36 @@ Vagrant.configure("2") do |config|
   # Базовый образ
   config.vm.box = "ubuntu/jammy64"
 
-  # Общие настройки
+  # Общие настройки для виртуальных машин
   config.vm.provider "virtualbox" do |vb|
     vb.memory = "1024"
     vb.cpus = 2
   end
 
-  # Сервер OpenVPN
-  config.vm.define "server" do |server|
-    server.vm.hostname = "server.loc"
+  # OpenVPN сервер (режим TAP)
+  config.vm.define "server_tap" do |server|
+    server.vm.hostname = "server-tap.loc"
     server.vm.network "private_network", ip: "192.168.56.10"
     server.vm.provision "shell", inline: <<-SHELL
       apt update && apt install -y openvpn iperf3
-      openvpn --genkey secret /vagrant/static.key
+      openvpn --genkey secret /etc/openvpn/static.key
       echo "dev tap
 ifconfig 10.10.10.1 255.255.255.0
 topology subnet
-secret /vagrant/static.key
+secret /etc/openvpn/static.key
 comp-lzo
 status /var/log/openvpn-status.log
 log /var/log/openvpn.log
-verb 3" > /etc/openvpn/server.conf
-      systemctl enable openvpn@server
-      systemctl start openvpn@server
+verb 3" > /etc/openvpn/server-tap.conf
+      systemctl enable openvpn@server-tap
+      systemctl start openvpn@server-tap
       iperf3 -s &
     SHELL
   end
 
-  # Клиент OpenVPN
-  config.vm.define "client" do |client|
-    client.vm.hostname = "client.loc"
+  # OpenVPN клиент (режим TAP)
+  config.vm.define "client_tap" do |client|
+    client.vm.hostname = "client-tap.loc"
     client.vm.network "private_network", ip: "192.168.56.20"
     client.vm.provision "shell", inline: <<-SHELL
       apt update && apt install -y openvpn iperf3
@@ -45,11 +45,11 @@ secret /etc/openvpn/static.key
 comp-lzo
 status /var/log/openvpn-status.log
 log /var/log/openvpn.log
-verb 3" > /etc/openvpn/client.conf
-      systemctl enable openvpn@client
-      systemctl start openvpn@client
+verb 3" > /etc/openvpn/client-tap.conf
+      systemctl enable openvpn@client-tap
+      systemctl start openvpn@client-tap
       sleep 5
-      if systemctl is-active --quiet openvpn@client; then
+      if systemctl is-active --quiet openvpn@client-tap; then
         iperf3 -c 10.10.10.1 -t 40 -i 5
       else
         echo "OpenVPN client failed to start"
@@ -57,4 +57,55 @@ verb 3" > /etc/openvpn/client.conf
       fi
     SHELL
   end
+
+  # OpenVPN сервер (режим TUN)
+  config.vm.define "server_tun" do |server|
+    server.vm.hostname = "server-tun.loc"
+    server.vm.network "private_network", ip: "192.168.56.11"
+    server.vm.provision "shell", inline: <<-SHELL
+      apt update && apt install -y openvpn iperf3
+      openvpn --genkey secret /etc/openvpn/static.key
+      echo "dev tun
+ifconfig 10.10.20.1 255.255.255.0
+topology subnet
+secret /etc/openvpn/static.key
+comp-lzo
+status /var/log/openvpn-status.log
+log /var/log/openvpn.log
+verb 3" > /etc/openvpn/server-tun.conf
+      systemctl enable openvpn@server-tun
+      systemctl start openvpn@server-tun
+      iperf3 -s &
+    SHELL
+  end
+
+  # OpenVPN клиент (режим TUN)
+  config.vm.define "client_tun" do |client|
+    client.vm.hostname = "client-tun.loc"
+    client.vm.network "private_network", ip: "192.168.56.21"
+    client.vm.provision "shell", inline: <<-SHELL
+      apt update && apt install -y openvpn iperf3
+      cp /vagrant/static.key /etc/openvpn/static.key
+      echo "dev tun
+remote 192.168.56.11
+ifconfig 10.10.20.2 255.255.255.0
+topology subnet
+route 192.168.56.0 255.255.255.0
+secret /etc/openvpn/static.key
+comp-lzo
+status /var/log/openvpn-status.log
+log /var/log/openvpn.log
+verb 3" > /etc/openvpn/client-tun.conf
+      systemctl enable openvpn@client-tun
+      systemctl start openvpn@client-tun
+      sleep 5
+      if systemctl is-active --quiet openvpn@client-tun; then
+        iperf3 -c 10.10.20.1 -t 40 -i 5
+      else
+        echo "OpenVPN client failed to start"
+        exit 1
+      fi
+    SHELL
+  end
 end
+
