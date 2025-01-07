@@ -1,0 +1,122 @@
+Vagrant.configure("2") do |config|
+  # --- Базовый образ ---
+  config.vm.box = "ubuntu/jammy64"
+
+  # --- Общие настройки VirtualBox ---
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "1024"
+    vb.cpus = 2
+  end
+
+  ## --- OpenVPN Сервер ---
+  config.vm.define "server" do |server|
+    server.vm.hostname = "server.loc"
+    server.vm.network "private_network", ip: "192.168.56.10"
+    server.vm.provision "shell", inline: <<-SHELL
+      set -e
+
+      # Установка необходимых пакетов
+      apt update && apt install -y openvpn easy-rsa iperf3
+
+      # Инициализация PKI
+      mkdir -p /etc/openvpn/easy-rsa
+      cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+      cd /etc/openvpn/easy-rsa
+
+      ./easyrsa init-pki
+      echo -e "\n\n" | ./easyrsa build-ca nopass     # Создание центра сертификации (CA)
+
+      ./easyrsa gen-req server nopass                # Генерация запроса на сертификат сервера
+      echo "yes" | ./easyrsa sign-req server server   # Подпись сертификата сервера
+
+      ./easyrsa gen-dh                               # Генерация параметров Диффи-Хеллмана
+
+      # Создание server.conf
+      cat > /etc/openvpn/server.conf <<EOF
+dev tun
+proto udp
+port 1207
+ca /etc/openvpn/easy-rsa/pki/ca.crt
+cert /etc/openvpn/easy-rsa/pki/issued/server.crt
+key /etc/openvpn/easy-rsa/pki/private/server.key
+dh /etc/openvpn/easy-rsa/pki/dh.pem
+server 10.10.10.0 255.255.255.0
+ifconfig-pool-persist ipp.txt
+keepalive 10 120
+comp-lzo
+persist-key
+persist-tun
+status /var/log/openvpn-status.log
+log /var/log/openvpn.log
+verb 3
+EOF
+
+      # Включение и запуск OpenVPN
+      systemctl enable openvpn@server
+      systemctl start openvpn@server
+
+      # Создание клиентских сертификатов
+      export EASYRSA_REQ_CN="client"
+      export EASYRSA_BATCH=1
+      ./easyrsa gen-req client nopass
+      echo "yes" | ./easyrsa sign-req client client
+
+      # Копирование клиентских сертификатов в общую папку
+      cp /etc/openvpn/easy-rsa/pki/ca.crt /vagrant/
+      cp /etc/openvpn/easy-rsa/pki/issued/client.crt /vagrant/
+      cp /etc/openvpn/easy-rsa/pki/private/client.key /vagrant/
+
+      # Запуск iPerf3 для тестирования
+      iperf3 -s &
+    SHELL
+  end
+
+  ## --- OpenVPN Клиент ---
+  config.vm.define "client" do |client|
+    client.vm.hostname = "client.loc"
+    client.vm.network "private_network", ip: "192.168.56.20"
+    client.vm.provision "shell", inline: <<-SHELL
+      set -e
+
+      # Установка необходимых пакетов
+      apt update && apt install -y openvpn iperf3
+
+      # Копирование ключей и сертификатов
+      cp /vagrant/ca.crt /etc/openvpn/
+      cp /vagrant/client.crt /etc/openvpn/
+      cp /vagrant/client.key /etc/openvpn/
+
+      # Создание client.conf
+      cat > /etc/openvpn/client.conf <<EOF
+dev tun
+proto udp
+remote 192.168.56.10 1207
+client
+resolv-retry infinite
+remote-cert-tls server
+ca /etc/openvpn/ca.crt
+cert /etc/openvpn/client.crt
+key /etc/openvpn/client.key
+route 192.168.56.0 255.255.255.0
+persist-key
+persist-tun
+comp-lzo
+verb 3
+EOF
+
+      # Включение и запуск OpenVPN
+      systemctl enable openvpn@client
+      systemctl start openvpn@client
+
+      # Проверка соединения
+      sleep 5
+      if systemctl is-active --quiet openvpn@client; then
+        echo "OpenVPN клиент успешно подключен к серверу."
+        iperf3 -c 10.10.10.1 -t 40 -i 5
+      else
+        echo "Ошибка запуска OpenVPN клиента."
+        exit 1
+      fi
+    SHELL
+  end
+end
