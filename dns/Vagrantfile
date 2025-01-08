@@ -1,0 +1,170 @@
+Vagrant.configure(2) do |config|
+  config.vm.box = "centos/7"
+
+  # Общие настройки для всех ВМ
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 512
+    v.cpus = 1
+  end
+
+  # DNS-сервер ns01 (Master)
+  config.vm.define "ns01" do |ns01|
+    ns01.vm.hostname = "ns01"
+    ns01.vm.network "private_network", ip: "192.168.50.10"
+    ns01.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      yum clean all
+      yum makecache
+      sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo
+      sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+      yum install -y bind bind-utils ntp
+
+      # Настройка NTP
+      systemctl enable --now ntpd
+
+      # Настройка DNS сервера
+      cat > /etc/named.conf <<EOL
+options {
+  listen-on port 53 { 192.168.50.10; };
+  directory "/var/named";
+  recursion yes;
+  allow-query { any; };
+};
+
+zone "dns.lab" {
+  type master;
+  file "/etc/named/named.dns.lab";
+};
+
+zone "newdns.lab" {
+  type master;
+  file "/etc/named/named.newdns.lab";
+};
+
+include "/etc/named.rfc1912.zones";
+include "/etc/named.root.key";
+EOL
+
+      cat > /etc/named/named.dns.lab <<EOL
+$TTL 3600
+@       IN SOA ns01.dns.lab. root.dns.lab. (
+          2024061101 ; serial
+          3600       ; refresh
+          600        ; retry
+          86400      ; expire
+          600        ; minimum
+)
+        IN NS ns01.dns.lab.
+        IN NS ns02.dns.lab.
+
+web1    IN A 192.168.50.15
+web2    IN A 192.168.50.16
+EOL
+
+      cat > /etc/named/named.newdns.lab <<EOL
+$TTL 3600
+@       IN SOA ns01.dns.lab. root.dns.lab. (
+          2024061101 ; serial
+          3600       ; refresh
+          600        ; retry
+          86400      ; expire
+          600        ; minimum
+)
+        IN NS ns01.dns.lab.
+        IN NS ns02.dns.lab.
+
+www     IN A 192.168.50.15
+www     IN A 192.168.50.16
+EOL
+
+      chown root:named /etc/named.conf /etc/named/named.dns.lab /etc/named/named.newdns.lab
+      chmod 640 /etc/named.conf
+      chmod 660 /etc/named/named.dns.lab /etc/named/named.newdns.lab
+
+      systemctl enable --now named
+      setenforce 1
+      semanage permissive -d named_t
+    SHELL
+  end
+
+  # DNS-сервер ns02 (Slave)
+  config.vm.define "ns02" do |ns02|
+    ns02.vm.hostname = "ns02"
+    ns02.vm.network "private_network", ip: "192.168.50.11"
+    ns02.vm.provision "shell", inline: <<-SHELL
+      # Установка необходимых пакетов
+      yum clean all
+      yum makecache
+      sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo
+      sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+      yum install -y bind bind-utils ntp
+
+      # Настройка NTP
+      systemctl enable --now ntpd
+
+      # Настройка DNS сервера
+      cat > /etc/named.conf <<EOL
+options {
+  listen-on port 53 { 192.168.50.11; };
+  directory "/var/named";
+  recursion yes;
+  allow-query { any; };
+};
+
+zone "dns.lab" {
+  type slave;
+  masters { 192.168.50.10; };
+  file "/etc/named/slave.dns.lab";
+};
+
+zone "newdns.lab" {
+  type slave;
+  masters { 192.168.50.10; };
+  file "/etc/named/slave.newdns.lab";
+};
+
+include "/etc/named.rfc1912.zones";
+include "/etc/named.root.key";
+EOL
+
+      chown root:named /etc/named.conf
+      chmod 640 /etc/named.conf
+
+      systemctl enable --now named
+      setenforce 1
+      semanage permissive -d named_t
+    SHELL
+  end
+
+  # Клиент client1
+  config.vm.define "client1" do |client1|
+    client1.vm.hostname = "client1"
+    client1.vm.network "private_network", ip: "192.168.50.15"
+    client1.vm.provision "shell", inline: <<-SHELL
+      yum clean all
+      yum makecache
+      sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo
+      sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+      yum install -y bind-utils
+
+      echo "nameserver 192.168.50.10" > /etc/resolv.conf
+      echo "search dns.lab" >> /etc/resolv.conf
+    SHELL
+  end
+
+  # Клиент client2
+  config.vm.define "client2" do |client2|
+    client2.vm.hostname = "client2"
+    client2.vm.network "private_network", ip: "192.168.50.16"
+    client2.vm.provision "shell", inline: <<-SHELL
+      yum clean all
+      yum makecache
+      sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo
+      sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+      yum install -y bind-utils
+
+      echo "nameserver 192.168.50.11" > /etc/resolv.conf
+      echo "search dns.lab" >> /etc/resolv.conf
+    SHELL
+  end
+end
