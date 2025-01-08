@@ -1,0 +1,200 @@
+Vagrant.configure("2") do |config|
+  # Общие настройки для всех маршрутизаторов
+  config.vm.box = "ubuntu/focal64"
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "512"
+    vb.cpus = 1
+  end
+
+  # Отключаем проверку SSH-ключей
+  config.ssh.insert_key = false
+
+  ## ROUTER1
+  config.vm.define "router1" do |router|
+    router.vm.hostname = "router1"
+    router.vm.network "private_network", ip: "192.168.50.10"
+    router.vm.network "private_network", ip: "10.0.10.1"
+    router.vm.network "private_network", ip: "10.0.12.1"
+    router.vm.network "private_network", ip: "192.168.10.1"
+
+    router.vm.provision "shell", inline: <<-SHELL
+      # Устанавливаем FRR
+      sudo apt update
+      sudo apt install -y frr frr-pythontools
+
+      # Включаем маршрутизацию
+      sudo sysctl -w net.ipv4.conf.all.forwarding=1
+      echo "net.ipv4.conf.all.forwarding=1" | sudo tee -a /etc/sysctl.conf
+
+      # Настраиваем демоны FRR
+      sudo tee /etc/frr/daemons <<EOF
+zebra=yes
+ospfd=yes
+bgpd=no
+ospf6d=no
+ripd=no
+ripngd=no
+isisd=no
+pimd=no
+ldpd=no
+nhrpd=no
+eigrpd=no
+babeld=no
+sharpd=no
+pbrd=no
+bfdd=no
+fabricd=no
+vrrpd=no
+pathd=no
+EOF
+
+      sudo chown frr:frr /etc/frr/daemons
+      sudo chmod 640 /etc/frr/daemons
+
+      # Настройка OSPF
+      sudo tee /etc/frr/frr.conf <<EOF
+frr version 10.2.1
+frr defaults traditional
+hostname router1
+log syslog informational
+no ipv6 forwarding
+service integrated-vtysh-config
+
+interface enp0s8
+ description r1-r2
+ ip address 10.0.10.1/30
+ ip ospf mtu-ignore
+ ip ospf hello-interval 10
+ ip ospf dead-interval 30
+
+interface enp0s9
+ description r1-r3
+ ip address 10.0.12.1/30
+ ip ospf mtu-ignore
+ ip ospf hello-interval 10
+ ip ospf dead-interval 30
+
+interface enp0s10
+ description net_router1
+ ip address 192.168.10.1/24
+ ip ospf mtu-ignore
+ ip ospf hello-interval 10
+ ip ospf dead-interval 30
+
+router ospf
+ router-id 1.1.1.1
+ network 10.0.10.0/30 area 0
+ network 10.0.12.0/30 area 0
+ network 192.168.10.0/24 area 0
+ neighbor 10.0.10.2
+ neighbor 10.0.12.2
+
+log file /var/log/frr/frr.log
+default-information originate always
+EOF
+
+      sudo chown frr:frr /etc/frr/frr.conf
+      sudo chmod 640 /etc/frr/frr.conf
+
+      # Перезапускаем FRR
+      sudo systemctl restart frr
+      sudo systemctl enable frr
+    SHELL
+  end
+
+  ## ROUTER2
+  config.vm.define "router2" do |router|
+    router.vm.hostname = "router2"
+    router.vm.network "private_network", ip: "192.168.50.11"
+    router.vm.network "private_network", ip: "10.0.10.2"
+    router.vm.network "private_network", ip: "10.0.11.1"
+    router.vm.network "private_network", ip: "192.168.20.1"
+
+    router.vm.provision "shell", inline: <<-SHELL
+      sudo apt update
+      sudo apt install -y frr frr-pythontools
+
+      sudo sysctl -w net.ipv4.conf.all.forwarding=1
+      echo "net.ipv4.conf.all.forwarding=1" | sudo tee -a /etc/sysctl.conf
+
+      sudo tee /etc/frr/daemons <<EOF
+zebra=yes
+ospfd=yes
+EOF
+
+      sudo tee /etc/frr/frr.conf <<EOF
+frr version 10.2.1
+hostname router2
+log syslog informational
+no ipv6 forwarding
+service integrated-vtysh-config
+
+interface enp0s8
+ description r2-r1
+ ip address 10.0.10.2/30
+ ip ospf hello-interval 10
+ ip ospf dead-interval 30
+
+interface enp0s9
+ description r2-r3
+ ip address 10.0.11.1/30
+ ip ospf hello-interval 10
+ ip ospf dead-interval 30
+
+router ospf
+ router-id 2.2.2.2
+ network 10.0.10.0/30 area 0
+ network 10.0.11.0/30 area 0
+ neighbor 10.0.10.1
+ neighbor 10.0.11.2
+
+log file /var/log/frr/frr.log
+EOF
+
+      sudo systemctl restart frr
+      sudo systemctl enable frr
+    SHELL
+  end
+
+  ## ROUTER3
+  config.vm.define "router3" do |router|
+    router.vm.hostname = "router3"
+    router.vm.network "private_network", ip: "192.168.50.12"
+    router.vm.network "private_network", ip: "10.0.12.2"
+    router.vm.network "private_network", ip: "10.0.11.2"
+    router.vm.network "private_network", ip: "192.168.30.1"
+
+    router.vm.provision "shell", inline: <<-SHELL
+      sudo apt update
+      sudo apt install -y frr frr-pythontools
+
+      sudo sysctl -w net.ipv4.conf.all.forwarding=1
+
+      sudo tee /etc/frr/daemons <<EOF
+zebra=yes
+ospfd=yes
+EOF
+
+      sudo tee /etc/frr/frr.conf <<EOF
+frr version 10.2.1
+hostname router3
+log syslog informational
+no ipv6 forwarding
+
+interface enp0s8
+ description r3-r1
+ ip address 10.0.12.2/30
+
+router ospf
+ router-id 3.3.3.3
+ network 10.0.12.0/30 area 0
+ neighbor 10.0.12.1
+
+log file /var/log/frr/frr.log
+EOF
+
+      sudo systemctl restart frr
+      sudo systemctl enable frr
+    SHELL
+  end
+end
